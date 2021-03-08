@@ -27,7 +27,6 @@
          tick/2]).
 
 -export([recover/0,
-         start_cluster/1,
          add_replica/2,
          delete_replica/2,
          register_listener/1]).
@@ -56,31 +55,32 @@
 
 
 -type state() :: #?MODULE{}.
--type command() :: {policy_changed, #{stream_id := stream_id()}} |
-                   {start_cluster, #{queue := amqqueue:amqqueue()}} |
-                   {start_cluster_reply, amqqueue:amqqueue()} |
-                   {start_replica, #{stream_id := stream_id(),
-                                     node := node(),
-                                     retries := non_neg_integer()}} |
-                   {start_replica_failed, #{stream_id := stream_id(),
-                                            node := node(),
-                                            retries := non_neg_integer()},
-                    Reply :: term()} |
-                   {start_replica_reply, stream_id(), pid()} |
+-type args() :: #{index := ra:index(),
+                  node := node(),
+                  epoch := osiris:epoch()}.
 
-                   {delete_replica, #{stream_id := stream_id(),
-                                      node := node()}} |
-                   {start_leader_election, stream_id(), osiris:epoch(),
-                    Offsets :: term()} |
-                   {leader_elected, stream_id(), NewLeaderPid :: pid()} |
-                   {replicas_stopped, stream_id()} |
-                   {phase_finished, stream_id(), Reply :: term()} |
-                   {stream_updated, stream()} |
+-type command() :: {new_stream, stream_id(), #{leader_node := node(),
+                                               queue := amqqueue:amqqueue()}} |
+                   {delete_stream, stream_id(), #{}} |
+                   {add_replica, stream_id(), #{node := node()}} |
+                   {delete_replica, stream_id(), #{node := node()}} |
+                   {policy_changed, stream_id(), #{queue := amqqueue:amqueue()}} |
                    {register_listener, #{pid := pid(),
                                          stream_id := stream_id(),
                                          queue_ref := queue_ref()}} |
+                   {action_failed, stream_id(), #{index := ra:index(),
+                                                  node := node(),
+                                                  epoch := osiris:epoch(),
+                                                  action := atom(), %% TODO: refine
+                                                  term() => term()}} |
+                   {member_started, stream_id(), #{index := ra:index(),
+                                                   node := node(),
+                                                   epoch := osiris:epoch(),
+                                                   pid := pid()}} |
+                   {member_stopped, stream_id(), args()} |
+                   {retention_updated, stream_id(), args()} |
+                   {mnesia_updated, stream_id(), args()} |
                    ra_machine:effect().
-
 
 -export_type([command/0]).
 
@@ -89,7 +89,7 @@ start() ->
     ServerId = {?MODULE, node()},
     case ra:restart_server(ServerId) of
         {error, Reason} when Reason == not_started orelse
-                             Reason == name_not_registered -> 
+                             Reason == name_not_registered ->
             case ra:start_server(make_ra_conf(node(), Nodes)) of
                 ok ->
                     global:set_lock(?STREAM_COORDINATOR_STARTUP),
@@ -113,18 +113,8 @@ start() ->
             exit(Error)
     end.
 
-find_members([]) ->
-    [];
-find_members([Node | Nodes]) ->
-    case ra:members({?MODULE, Node}) of
-        {_, Members, _} ->
-            Members;
-        {error, noproc} ->
-            find_members(Nodes);
-        {timeout, _} ->
-            %% not sure what to do here
-            find_members(Nodes)
-    end.
+recover() ->
+    ra:restart_server({?MODULE, node()}).
 
 %% new api
 
@@ -141,7 +131,7 @@ new_stream(Q, LeaderNode)
 delete_stream(Q, ActingUser)
   when ?is_amqqueue(Q) ->
     #{name := StreamId} = amqqueue:get_type_state(Q),
-    case process_command({delete_stream, StreamId, #{acting_user => ActingUser}}) of
+    case process_command({delete_stream, StreamId, #{}}) of
         {ok, ok, _} ->
             QName = amqqueue:get_name(Q),
               _ = rabbit_amqqueue:internal_delete(QName, ActingUser),
@@ -149,14 +139,6 @@ delete_stream(Q, ActingUser)
         Err ->
             Err
     end.
-
-%% end new api
-
-recover() ->
-    ra:restart_server({?MODULE, node()}).
-
-start_cluster(Q) ->
-    process_command({start_cluster, #{queue => Q}}).
 
 add_replica(StreamId, Node) ->
     process_command({add_replica, StreamId, #{node => Node}}).
@@ -1420,6 +1402,19 @@ maybe_sleep({{nodedown, _}, _}) ->
     timer:sleep(5000);
 maybe_sleep(_) ->
     ok.
+
+find_members([]) ->
+    [];
+find_members([Node | Nodes]) ->
+    case ra:members({?MODULE, Node}) of
+        {_, Members, _} ->
+            Members;
+        {error, noproc} ->
+            find_members(Nodes);
+        {timeout, _} ->
+            %% not sure what to do here
+            find_members(Nodes)
+    end.
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
