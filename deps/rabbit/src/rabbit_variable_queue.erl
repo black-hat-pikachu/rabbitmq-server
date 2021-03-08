@@ -2496,9 +2496,9 @@ reduce_memory_use(State = #vqstate {
                   State2
         end,
     State4 = push_betas_to_deltas(?QUEUE:len(Q3), State3),
-    State5 = State4 #vqstate { index_state = rabbit_queue_index:flush(IndexState) },
+%    State5 = State4 #vqstate { index_state = rabbit_queue_index:flush(IndexState) },
     garbage_collect(),
-    State5.
+    State4.
 
 maybe_bump_reduce_memory_use(State = #vqstate{ waiting_bump = true }) ->
     State;
