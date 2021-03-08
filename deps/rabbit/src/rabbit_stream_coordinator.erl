@@ -409,7 +409,6 @@ tick(_Ts, _State) ->
 
 maybe_resize_coordinator_cluster() ->
     spawn(fun() ->
-                  rabbit_log:info("resizing coordinator cluster", []),
                   case ra:members({?MODULE, node()}) of
                       {_, Members, _} ->
                           MemberNodes = [Node || {_, Node} <- Members],
@@ -419,16 +418,17 @@ maybe_resize_coordinator_cluster() ->
                               [] ->
                                   ok;
                               New ->
-                                  rabbit_log:warning("New rabbit node(s) detected, "
-                                                     "adding stream coordinator in: ~p", [New]),
+                                  rabbit_log:warning("~s: New rabbit node(s) detected, "
+                                                     "adding : ~w",
+                                                     [?MODULE, New]),
                                   add_members(Members, New)
                           end,
                           case MemberNodes -- All of
                               [] ->
                                   ok;
                               Old ->
-                                  rabbit_log:warning("Rabbit node(s) removed from the cluster, "
-                                                     "deleting stream coordinator in: ~p", [Old]),
+                                  rabbit_log:warning("~s: Rabbit node(s) removed from the cluster, "
+                                                     "deleting: ~w", [?MODULE, Old]),
                                   remove_members(Members, Old)
                           end;
                       _ ->
@@ -596,12 +596,14 @@ phase_start_replica(StreamId, #{epoch := Epoch,
                       send_self_command({member_started, StreamId,
                                          Args#{pid => Pid}});
                   {error, Reason} ->
+                      maybe_sleep(Reason),
                       rabbit_log:warning("~s: Error while starting replica for ~s : ~W",
                                          [?MODULE, maps:get(name, Conf0), Reason, 10]),
                       send_action_failed(StreamId, starting, Args)
               catch _:E ->
                         rabbit_log:warning("~s: Error while starting replica for ~s : ~p",
                                            [?MODULE, maps:get(name, Conf0), E]),
+                        maybe_sleep(E),
                         send_action_failed(StreamId, starting, Args)
               end
       end).
@@ -623,9 +625,10 @@ phase_delete_member(StreamId, #{node := Node} = Arg, Conf) ->
                   _ ->
                       send_action_failed(StreamId, deleting, Arg)
               catch _:E ->
-                      rabbit_log:warning("~s: Error while deleting member for ~s : on node ~s ~p",
-                                         [?MODULE, StreamId, Node, E]),
-                      send_action_failed(StreamId, deleting, Arg)
+                        rabbit_log:warning("~s: Error while deleting member for ~s : on node ~s ~p",
+                                           [?MODULE, StreamId, Node, E]),
+                        maybe_sleep(E),
+                        send_action_failed(StreamId, deleting, Arg)
               end
       end).
 
@@ -661,8 +664,9 @@ phase_stop_member(StreamId, #{node := Node,
                       send_action_failed(StreamId, stopping, Arg0)
               catch _:Err ->
                         rabbit_log:warning("Stream coordinator failed to stop
-                                          member ~s ~w Error: ~w",
+                                            member ~s ~w Error: ~w",
                                            [StreamId, Node, Err]),
+                        maybe_sleep(Err),
                         send_action_failed(StreamId, stopping, Arg0)
               end
       end).
@@ -678,14 +682,15 @@ phase_start_writer(StreamId, #{epoch := Epoch,
                                          [?MODULE, StreamId, Node, Epoch]),
                       send_self_command({member_started, StreamId, Args});
                   Err ->
+                      %% no sleep for writer failures
                       rabbit_log:warning("~s: failed to start
                                           writer ~s ~w Error: ~w",
                                          [?MODULE, StreamId, Node, Err]),
-                        send_action_failed(StreamId, starting, Args0)
+                      send_action_failed(StreamId, starting, Args0)
               catch _:Err ->
-                      rabbit_log:warning("~s: failed to start
+                        rabbit_log:warning("~s: failed to start
                                           writer ~s ~w Error: ~w",
-                                         [?MODULE, StreamId, Node, Err]),
+                                           [?MODULE, StreamId, Node, Err]),
                         send_action_failed(StreamId, starting, Args0)
 
               end
@@ -704,10 +709,11 @@ phase_update_retention(StreamId, #{pid := Pid,
                                          [?MODULE, StreamId, node(Pid), Err]),
                       send_action_failed(StreamId, update_retention, Args)
               catch _:Err ->
-                      rabbit_log:warning("~s: failed to update
+                        rabbit_log:warning("~s: failed to update
                                           retention for ~s ~w Error: ~w",
-                                         [?MODULE, StreamId, node(Pid), Err]),
-                      send_action_failed(StreamId, update_retention, Args)
+                                           [?MODULE, StreamId, node(Pid), Err]),
+                        maybe_sleep(Err),
+                        send_action_failed(StreamId, update_retention, Args)
               end
       end).
 
@@ -755,8 +761,6 @@ phase_update_mnesia(StreamId, Args, #{reference := QName,
                                  rabbit_amqqueue:update(QName, Fun)
                          end) of
                       not_found ->
-                          rabbit_log:debug("~s: mnesia update for ~s: not_found",
-                                           [?MODULE, StreamId]),
                           %% This can happen during recovery
                           [Q] = mnesia:dirty_read(rabbit_durable_queue, QName),
                           %% TODO: what is the possible return type here?
@@ -1411,6 +1415,12 @@ select_leader(Offsets) ->
                                          true
                                  end, Offsets),
     Node.
+
+maybe_sleep({{nodedown, _}, _}) ->
+    timer:sleep(5000);
+maybe_sleep(_) ->
+    ok.
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
