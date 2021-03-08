@@ -1161,6 +1161,7 @@ evaluate_stream(#{index := Idx} = Meta,
              Stream = Stream0#stream{reply_to = undefined},
              eval_replicas(Meta, Writer, Replicas, Stream, Effs);
          {#member{state = {down, Epoch},
+                  target = stopped,
                   node = LeaderNode,
                   current = undefined} = Writer0, Replicas} ->
              %% leader is down - all replicas need to be stopped
@@ -1188,7 +1189,6 @@ evaluate_stream(#{index := Idx} = Meta,
              {Stream0#stream{members = Members}, Actions};
          {#member{state = {running, Epoch, LeaderPid},
                   target = running} = Writer, Replicas} ->
-
              Effs1 = case From of
                          undefined ->
                              Effs0;
