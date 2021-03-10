@@ -36,8 +36,10 @@
 
 -export([policy_changed/1]).
 
--export([local_pid/1]).
--export([query_local_pid/3]).
+-export([local_pid/1,
+         members/1]).
+-export([query_local_pid/3,
+         query_members/2]).
 
 
 -export([log_overview/1]).
@@ -159,6 +161,34 @@ local_pid(StreamId) when is_list(StreamId) ->
             Err;
         {timeout, _} ->
             {error, timeout}
+    end.
+
+-spec members(stream_id()) ->
+    {ok, #{node() := {pid() | undefined, writer | replica}}} |
+    {error, not_found}.
+members(StreamId) when is_list(StreamId) ->
+    MFA = {?MODULE, query_members, [StreamId]},
+    case ra:local_query({?MODULE, node()}, MFA) of
+        {ok, {_, Result}, _} ->
+            Result;
+        {error, _} = Err ->
+            Err;
+        {timeout, _} ->
+            {error, timeout}
+    end.
+
+query_members(StreamId, #?MODULE{streams = Streams}) ->
+    case Streams of
+        #{StreamId := #stream{members = Members}} ->
+            {ok, maps:map(
+                   fun (_, #member{state = {running, _, Pid},
+                                   role = {Role, _}}) ->
+                           {Pid, Role};
+                       (_, #member{role = {Role, _}}) ->
+                           {undefined, Role}
+                   end, Members)};
+        _ ->
+            {error, not_found}
     end.
 
 query_local_pid(StreamId, Node, #?MODULE{streams = Streams}) ->
