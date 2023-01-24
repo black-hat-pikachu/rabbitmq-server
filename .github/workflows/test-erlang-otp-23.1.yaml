@@ -5460,7 +5460,7 @@ jobs:
     runs-on: ubuntu-18.04
     if: '!contains(github.event.head_commit.message, ''[ci skip]'') && (success() || failure())'
     steps:
-    - uses: technote-space/workflow-conclusion-action@v1
+    - uses: technote-space/workflow-conclusion-action@v3
     - uses: google-github-actions/setup-gcloud@master
       with:
         service_account_key: ${{ secrets.GCR_JSON_KEY }}
