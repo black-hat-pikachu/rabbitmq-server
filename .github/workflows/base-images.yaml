@@ -32,7 +32,7 @@ jobs:
         username: _json_key
         password: ${{ secrets.GCR_JSON_KEY }}
     - name: CREATE ERLANG+ELIXIR IMAGE (${{ matrix.erlang_version }})
-      uses: docker/build-push-action@v2
+      uses: docker/build-push-action@v5
       with:
         push: true
         file: ci/dockerfiles/${{ matrix.erlang_version }}/erlang_elixir
@@ -40,7 +40,7 @@ jobs:
         cache-from: type=local,src=/tmp/.buildx-cache
         cache-to: type=local,dest=/tmp/.buildx-cache
     - name: CREATE BASE CI IMAGE (${{ matrix.erlang_version }})
-      uses: docker/build-push-action@v2
+      uses: docker/build-push-action@v5
       with:
         push: true
         file: ci/dockerfiles/ci-base
